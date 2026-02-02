@@ -1,20 +1,80 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+project:
+  name: n8n-s3-presigned-node
+  description: |
+    Dự án custom node cho n8n dùng để tạo presigned URL cho Amazon S3.
+    Node này cho phép sinh link upload/download tạm thời phục vụ workflow tự động.
+  type: n8n-custom-node
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+language:
+  runtime: nodejs
+  version: "18.x"
+  package_manager: npm
+
+coding:
+  language: english
+  style: clean
+  conventions:
+    - camelCase for variables and functions
+    - PascalCase for classes
+    - UPPER_SNAKE_CASE for constants
+    - async/await preferred
+    - no any type unless unavoidable
+
+framework:
+  platform: n8n
+  node_type: custom
+  sdk: n8n-workflow
+
+cloud:
+  provider: aws
+  service: s3
+  auth:
+    method: iam
+    credentials_source: environment_variables
+
+features:
+  - generate_presigned_url
+  - support_upload_and_download
+  - configurable_expiration_time
+  - bucket_and_object_key_dynamic
+
+aws:
+  s3:
+    presigned:
+      operations:
+        - getObject
+        - putObject
+      default_expiration_seconds: 900
+
+environment_variables:
+  required:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_REGION
+  optional:
+    - AWS_S3_ENDPOINT
+    - AWS_SESSION_TOKEN
+
+agent_rules:
+  language_policy:
+    explanation: vietnamese
+    code: english
+  constraints:
+    - Do not hardcode AWS credentials
+    - Use AWS SDK v3
+    - Handle errors explicitly
+    - Validate input parameters
+
+documentation:
+  language: vietnamese
+  target_audience:
+    - developers
+    - automation_engineers
+
+output:
+  format:
+    - presigned_url
+    - expiration_time
+    - http_method

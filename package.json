@@ -30,14 +30,8 @@
 	"n8n": {
 		"n8nNodesApiVersion": 1,
 		"strict": true,
-		"credentials": [
-			"dist/credentials/GithubIssuesApi.credentials.js",
-			"dist/credentials/GithubIssuesOAuth2Api.credentials.js"
-		],
-		"nodes": [
-			"dist/nodes/GithubIssues/GithubIssues.node.js",
-			"dist/nodes/Example/Example.node.js"
-		]
+		"credentials": [],
+		"nodes": []
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",

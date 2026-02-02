@@ -2,7 +2,7 @@
 
 # n8n-nodes-starter
 
-This starter repository helps you build custom integrations for [n8n](https://n8n.io). It includes example nodes, credentials, the node linter, and all the tooling you need to get started.
+This starter repository helps you build custom integrations for [n8n](https://n8n.io). It includes the node linter and all the tooling you need to get started, with a clean template (no example nodes).
 
 ## Quick Start
 
@@ -25,22 +25,12 @@ This starts n8n with your nodes loaded and hot reload enabled.
 
 ## What's Included
 
-This starter repository includes two example nodes to learn from:
+This starter repository includes:
 
-- **[Example Node](nodes/Example/)** - A simple starter node that shows the basic structure with a custom `execute` method
-- **[GitHub Issues Node](nodes/GithubIssues/)** - A complete, production-ready example built using the **declarative style**:
-  - **Low-code approach** - Define operations declaratively without writing request logic
-  - Multiple resources (Issues, Comments)
-  - Multiple operations (Get, Get All, Create)
-  - Two authentication methods (OAuth2 and Personal Access Token)
-  - List search functionality for dynamic dropdowns
-  - Proper error handling and typing
-  - Ideal for HTTP API-based integrations
-
-> [!TIP]
-> The declarative/low-code style (used in GitHub Issues) is the recommended approach for building nodes that interact with HTTP APIs. It significantly reduces boilerplate code and handles requests automatically.
-
-Browse these examples to understand both approaches, then modify them or create your own.
+- Node CLI tooling and scripts (build, dev, lint, release)
+- TypeScript and ESLint configuration for n8n nodes
+- A README template you can adapt for your node
+- A clean project layout with no example nodes
 
 ## Finding Inspiration
 
@@ -91,21 +81,14 @@ npm install
 
 This installs all required dependencies including the `@n8n/node-cli`.
 
-### 3. Explore the Examples
+### 3. Build Your Node
 
-Browse the example nodes in [nodes/](nodes/) and [credentials/](credentials/) to understand the structure:
-
-- Start with [nodes/Example/](nodes/Example/) for a basic node
-- Study [nodes/GithubIssues/](nodes/GithubIssues/) for a real-world implementation
-
-### 4. Build Your Node
-
-Edit the example nodes to fit your use case, or create new node files by copying the structure from [nodes/Example/](nodes/Example/).
+Create your node files in `nodes/` and, if needed, credentials in `credentials/`. Use the [n8n node documentation](https://docs.n8n.io/integrations/creating-nodes/) as a reference for structure and best practices.
 
 > [!TIP]
 > If you want to scaffold a completely new node package, use `npm create @n8n/node` to start fresh with the CLI's interactive generator.
 
-### 5. Configure Your Package
+### 4. Configure Your Package
 
 Update `package.json` with your details:
 
@@ -115,6 +98,17 @@ Update `package.json` with your details:
 - `description` - What your node does
 
 Make sure your node is registered in the `n8n.nodes` array.
+
+### 5. New project checklist
+
+Before you start building, update these template fields:
+
+- `package.json`: `name`, `version`, `description`, `author`, `repository`, `homepage`, `keywords`
+- `package.json`: `n8n.nodes` and `n8n.credentials` with your new node/credential paths
+- Node files: `displayName`, `name`, `icon`, `description`, and `group` in each node definition
+- Credentials: `name`, `displayName`, and any auth-related placeholders
+- `README.md` / `README_TEMPLATE.md`: replace placeholders (node name, app/service name, operations, credentials, compatibility)
+- `LICENSE.md`: update the copyright holder
 
 ### 6. Develop and Test Locally
 
