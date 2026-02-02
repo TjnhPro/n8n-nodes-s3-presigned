@@ -1,2 +1,4 @@
 dist
 node_modules
+n8n-nodes-s3-presigned.rar
+.gitignore

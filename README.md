@@ -18,6 +18,7 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 ## Operations
 
 - Generate presigned S3 upload URL (PUT)
+- List S3 folders/files (ListObjectsV2, tree view)
 
 ## Credentials
 
@@ -36,13 +37,20 @@ Designed for n8n community nodes with Node CLI tooling. If you encounter version
 
 1. Add the **S3 Presigned Upload** node.
 2. Configure credentials (Access Key, Secret, Region, optional Session Token).
-3. Set Bucket, Object Key, and Expires In (seconds).
-4. (Optional) Set Content Type, Content Disposition, ACL, and Metadata.
-5. The node outputs:
+3. Choose **Operation**:
+   - **Presigned Upload (PUT)**: set Bucket, Object Key, and Expires In (seconds).
+   - **List Tree (ListObjectsV2)**: set Bucket, Prefix, Delimiter, Max Keys (optional Continuation Token).
+   - Bucket có dấu chấm (`.`) sẽ tự dùng path-style để tránh lỗi SSL.
+4. (Optional) Set Content Type, Content Disposition, ACL, and Metadata for upload.
+5. The node outputs (upload):
    - `url`: presigned URL
    - `method`: `PUT`
    - `headers`: headers to send with the PUT
    - `expiresAt`: ISO timestamp
+6. The node outputs (list):
+   - `items`: folders first, then files (ready for tree view UI)
+   - `pagination.hasMore`: boolean
+   - `pagination.nextToken`: string (pass to Continuation Token)
 
 Example PUT request (pseudo):
 
