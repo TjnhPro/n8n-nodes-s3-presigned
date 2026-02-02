@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-s3-presigned",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Generate presigned S3 upload URLs using n8n credentials",
 	"license": "MIT",
 	"homepage": "",
@@ -39,6 +39,7 @@
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",
+		"@types/node": "^25.2.0",
 		"eslint": "9.32.0",
 		"prettier": "3.6.2",
 		"release-it": "^19.0.4",

@@ -3,7 +3,7 @@ import { ICredentialType, INodeProperties } from 'n8n-workflow';
 export class S3PresignedApi implements ICredentialType {
 	name = 's3PresignedApi';
 	displayName = 'S3 Presigned API';
-	icon = 'file:../icons/S3Presigned.svg';
+	icon = { light: 'file:../icons/S3Presigned.svg', dark: 'file:../icons/S3Presigned.svg' } as const;
 	documentationUrl = 'https://docs.aws.amazon.com/general/latest/gr/aws-access-keys-best-practices.html';
 	properties: INodeProperties[] = [
 		{
