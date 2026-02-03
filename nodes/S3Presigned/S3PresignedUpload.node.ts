@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import https from 'https';
 
 import {
 	IDataObject,
@@ -9,7 +8,6 @@ import {
 	INodeTypeDescription,
 	NodeOperationError,
 } from 'n8n-workflow';
-import { XMLParser } from 'fast-xml-parser';
 
 type MetadataEntry = {
 	key?: string;
@@ -70,10 +68,11 @@ const buildHost = (bucket: string, region: string): string => {
 const buildS3Endpoint = (
 	bucket: string,
 	region: string,
+	forcePathStyle: boolean,
 ): { host: string; pathPrefix: string } => {
-	if (bucket.includes('.')) {
+	if (forcePathStyle || bucket.includes('.')) {
 		const host = region === 'us-east-1' ? 's3.amazonaws.com' : `s3.${region}.amazonaws.com`;
-		return { host, pathPrefix: `/${bucket}` };
+		return { host, pathPrefix: `/${encodeRfc3986(bucket)}` };
 	}
 	return { host: buildHost(bucket, region), pathPrefix: '' };
 };
@@ -122,6 +121,7 @@ const buildPresignedPutUrl = (params: {
 	metadata: Record<string, string>;
 	credentials: AwsCredentials;
 	requestDate: Date;
+	forcePathStyle: boolean;
 }): { url: string; headers: Record<string, string>; expiresAt: string } => {
 	const {
 		bucket,
@@ -133,11 +133,13 @@ const buildPresignedPutUrl = (params: {
 		metadata,
 		credentials,
 		requestDate,
+		forcePathStyle,
 	} = params;
 	const { amzDate, dateStamp } = toAmzDate(requestDate);
 	const credentialScope = `${dateStamp}/${credentials.region}/${SERVICE}/aws4_request`;
 	const credential = `${credentials.accessKeyId}/${credentialScope}`;
-	const host = buildHost(bucket, credentials.region);
+	const endpoint = buildS3Endpoint(bucket, credentials.region, forcePathStyle);
+	const host = endpoint.host;
 
 	const headers: Record<string, string> = { host };
 	if (contentType) headers['content-type'] = contentType;
@@ -161,7 +163,7 @@ const buildPresignedPutUrl = (params: {
 		queryParams['X-Amz-Security-Token'] = credentials.sessionToken;
 	}
 
-	const canonicalUri = `/${encodeS3Key(key)}`;
+	const canonicalUri = `${endpoint.pathPrefix}/${encodeS3Key(key)}`.replace(/\/+/g, '/');
 	const canonicalQueryString = buildCanonicalQuery(queryParams);
 	const canonicalRequest = [
 		'PUT',
@@ -205,91 +207,6 @@ const buildPresignedPutUrl = (params: {
 	return { url, headers: responseHeaders, expiresAt };
 };
 
-const buildAuthorizationHeader = (params: {
-	method: string;
-	path: string;
-	queryParams: Record<string, string>;
-	headers: Record<string, string>;
-	credentials: AwsCredentials;
-	requestDate: Date;
-}): { authorization: string; signedHeaders: string; amzDate: string } => {
-	const { method, path, queryParams, headers, credentials, requestDate } = params;
-	const { amzDate, dateStamp } = toAmzDate(requestDate);
-	const credentialScope = `${dateStamp}/${credentials.region}/${SERVICE}/aws4_request`;
-	const { canonicalHeaders, signedHeaders } = buildCanonicalHeaders(headers);
-	const canonicalQueryString = buildCanonicalQuery(queryParams);
-	const canonicalRequest = [
-		method,
-		path,
-		canonicalQueryString,
-		canonicalHeaders,
-		signedHeaders,
-		'UNSIGNED-PAYLOAD',
-	].join('\n');
-
-	const stringToSign = [
-		ALGORITHM,
-		amzDate,
-		credentialScope,
-		hashSha256(canonicalRequest),
-	].join('\n');
-
-	const signingKey = getSignatureKey(
-		credentials.secretAccessKey,
-		dateStamp,
-		credentials.region,
-	);
-	const signature = crypto
-		.createHmac('sha256', signingKey)
-		.update(stringToSign, 'utf8')
-		.digest('hex');
-
-	const authorization = `${ALGORITHM} Credential=${credentials.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-	return { authorization, signedHeaders, amzDate };
-};
-
-const requestXml = async (
-	url: string,
-	headers: Record<string, string>,
-): Promise<string> =>
-	new Promise((resolve, reject) => {
-		const request = https.request(url, { method: 'GET', headers }, (response) => {
-			const chunks: Buffer[] = [];
-			response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-			response.on('end', () => {
-				const body = Buffer.concat(chunks).toString('utf8');
-				if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
-					resolve(body);
-					return;
-				}
-				reject(new Error(`S3 request failed (${response.statusCode}): ${body}`));
-			});
-		});
-		request.on('error', (error) => reject(error));
-		request.end();
-	});
-
-const normalizeArray = <T>(value?: T | T[]): T[] => {
-	if (!value) return [];
-	return Array.isArray(value) ? value : [value];
-};
-
-const normalizePrefix = (prefix?: string): string => {
-	if (!prefix) return '';
-	return prefix.endsWith('/') ? prefix : `${prefix}/`;
-};
-
-const toFolderName = (prefix: string): string => {
-	const trimmed = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
-	const parts = trimmed.split('/').filter(Boolean);
-	return parts[parts.length - 1] ?? trimmed;
-};
-
-const toFileName = (key: string): string => {
-	const parts = key.split('/').filter(Boolean);
-	return parts[parts.length - 1] ?? key;
-};
-
 export class S3PresignedUpload implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'S3 Presigned Upload',
@@ -297,7 +214,7 @@ export class S3PresignedUpload implements INodeType {
 		icon: 'file:../../icons/S3Presigned.svg',
 		group: ['transform'],
 		version: 1,
-		description: 'Generate presigned S3 upload data or list S3 folders (ListObjectsV2)',
+		description: 'Generate presigned S3 upload data.',
 		usableAsTool: true,
 		defaults: {
 			name: 'S3 Presigned Upload',
@@ -307,27 +224,18 @@ export class S3PresignedUpload implements INodeType {
 		credentials: [{ name: 's3PresignedApi', required: true, testedBy: 's3PresignedUpload' }],
 		properties: [
 			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				options: [
-					{ name: 'Presigned Upload (PUT)', value: 'presignedUpload' },
-					{ name: 'List Tree (ListObjectsV2)', value: 'listTree' },
-				],
-				default: 'presignedUpload',
-				noDataExpression: true,
-			},
-			{
 				displayName: 'Bucket',
 				name: 'bucket',
 				type: 'string',
 				default: '',
 				required: true,
-				displayOptions: {
-					show: {
-						operation: ['presignedUpload', 'listTree'],
-					},
-				},
+			},
+			{
+				displayName: 'Force Path Style',
+				name: 'forcePathStyle',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to use path-style URL even if bucket name is compatible with virtual hosting',
 			},
 			{
 				displayName: 'Object Key',
@@ -335,11 +243,6 @@ export class S3PresignedUpload implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				displayOptions: {
-					show: {
-						operation: ['presignedUpload'],
-					},
-				},
 			},
 			{
 				displayName: 'Expires In (Seconds)',
@@ -351,42 +254,27 @@ export class S3PresignedUpload implements INodeType {
 					minValue: 1,
 					maxValue: MAX_EXPIRES,
 				},
-				displayOptions: {
-					show: {
-						operation: ['presignedUpload'],
-					},
-				},
 			},
-		{
-			displayName: 'Content Type',
-			name: 'contentType',
-			type: 'string',
-			default: '',
-			displayOptions: {
-				show: {
-					operation: ['presignedUpload'],
-				},
+			{
+				displayName: 'Content Type',
+				name: 'contentType',
+				type: 'string',
+				default: '',
 			},
-		},
-		{
-			displayName: 'Content Disposition',
-			name: 'contentDisposition',
-			type: 'options',
-			options: [
-				{ name: 'Attachment', value: 'attachment' },
-				{ name: 'None', value: '' },
-			],
-			default: '',
-			displayOptions: {
-				show: {
-					operation: ['presignedUpload'],
-				},
+			{
+				displayName: 'Content Disposition',
+				name: 'contentDisposition',
+				type: 'options',
+				options: [
+					{ name: 'Attachment', value: 'attachment' },
+					{ name: 'None', value: '' },
+				],
+				default: '',
 			},
-		},
-		{
-			displayName: 'ACL',
-			name: 'acl',
-			type: 'options',
+			{
+				displayName: 'ACL',
+				name: 'acl',
+				type: 'options',
 				options: [
 					{ name: 'Authenticated Read', value: 'authenticated-read' },
 					{ name: 'Bucket Owner Full Control', value: 'bucket-owner-full-control' },
@@ -397,11 +285,6 @@ export class S3PresignedUpload implements INodeType {
 					{ name: 'Public Read Write', value: 'public-read-write' },
 				],
 				default: '',
-				displayOptions: {
-					show: {
-						operation: ['presignedUpload'],
-					},
-				},
 			},
 			{
 				displayName: 'Metadata',
@@ -431,62 +314,6 @@ export class S3PresignedUpload implements INodeType {
 						],
 					},
 				],
-				displayOptions: {
-					show: {
-						operation: ['presignedUpload'],
-					},
-				},
-			},
-			{
-				displayName: 'Prefix',
-				name: 'prefix',
-				type: 'string',
-				default: '',
-				description: 'Folder hiện tại. Để trống để duyệt root',
-				displayOptions: {
-					show: {
-						operation: ['listTree'],
-					},
-				},
-			},
-			{
-				displayName: 'Delimiter',
-				name: 'delimiter',
-				type: 'string',
-				default: '',
-				required: true,
-				description: 'Bắt buộc dùng "/" để duyệt theo folder',
-				displayOptions: {
-					show: {
-						operation: ['listTree'],
-					},
-				},
-			},
-			{
-				displayName: 'Max Keys',
-				name: 'maxKeys',
-				type: 'number',
-				default: 100,
-				typeOptions: {
-					minValue: 1,
-					maxValue: 1000,
-				},
-				displayOptions: {
-					show: {
-						operation: ['listTree'],
-					},
-				},
-			},
-			{
-				displayName: 'Continuation Token',
-				name: 'continuationToken',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['listTree'],
-					},
-				},
 			},
 		],
 	};
@@ -504,169 +331,58 @@ export class S3PresignedUpload implements INodeType {
 		}
 
 		for (let i = 0; i < items.length; i++) {
-			const operation = this.getNodeParameter('operation', i) as string;
 			const bucket = this.getNodeParameter('bucket', i) as string;
+			const forcePathStyle = this.getNodeParameter('forcePathStyle', i) as boolean;
+			const key = this.getNodeParameter('key', i) as string;
+			const expiresIn = this.getNodeParameter('expiresIn', i) as number;
+			const contentType = this.getNodeParameter('contentType', i, '') as string;
+			const contentDisposition = this.getNodeParameter('contentDisposition', i, '') as string;
+			const acl = this.getNodeParameter('acl', i, '') as string;
+			const metadataCollection = this.getNodeParameter('metadata', i, {}) as IDataObject;
+			const metadataValues = metadataCollection.metadataValues as MetadataEntry[] | undefined;
 
-			if (!bucket) {
-				throw new NodeOperationError(this.getNode(), 'Bucket is required');
+			if (!bucket || !key || !expiresIn) {
+				throw new NodeOperationError(this.getNode(), 'Bucket, key, and expiration are required');
 			}
 
-			if (operation === 'presignedUpload') {
-				const key = this.getNodeParameter('key', i) as string;
-				const expiresIn = this.getNodeParameter('expiresIn', i) as number;
-				const contentType = this.getNodeParameter('contentType', i, '') as string;
-				const contentDisposition = this.getNodeParameter('contentDisposition', i, '') as string;
-				const acl = this.getNodeParameter('acl', i, '') as string;
-				const metadataCollection = this.getNodeParameter('metadata', i, {}) as IDataObject;
-				const metadataValues = metadataCollection.metadataValues as MetadataEntry[] | undefined;
-
-				if (!bucket || !key || !expiresIn) {
-					throw new NodeOperationError(this.getNode(), 'Bucket, key, and expiration are required');
-				}
-
-				if (expiresIn < 1 || expiresIn > MAX_EXPIRES) {
-					throw new NodeOperationError(
-						this.getNode(),
-						`Expiration must be between 1 and ${MAX_EXPIRES} seconds`,
-					);
-				}
-
-				const metadata = buildMetadata(metadataValues);
-				const requestDate = new Date();
-
-				try {
-					const presignedPut = buildPresignedPutUrl({
-						bucket,
-						key,
-						expiresIn,
-						contentType: contentType || undefined,
-						contentDisposition: contentDisposition || undefined,
-						acl: acl || undefined,
-						metadata,
-						credentials,
-						requestDate,
-					});
-
-					returnData.push({
-						json: {
-							url: presignedPut.url,
-							method: 'PUT',
-							headers: presignedPut.headers,
-							expiresAt: presignedPut.expiresAt,
-						},
-					});
-				} catch (error) {
-					const message = error instanceof Error ? error.message : 'Unknown error';
-					throw new NodeOperationError(
-						this.getNode(),
-						`Failed to generate presigned upload data: ${message}`,
-					);
-				}
+			if (expiresIn < 1 || expiresIn > MAX_EXPIRES) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`Expiration must be between 1 and ${MAX_EXPIRES} seconds`,
+				);
 			}
 
-			if (operation === 'listTree') {
-				const prefixInput = this.getNodeParameter('prefix', i, '') as string;
-				const delimiter = this.getNodeParameter('delimiter', i, '') as string;
-				const maxKeys = this.getNodeParameter('maxKeys', i, 100) as number;
-				const continuationToken = this.getNodeParameter('continuationToken', i, '') as string;
+			const metadata = buildMetadata(metadataValues);
+			const requestDate = new Date();
 
-				if (!delimiter) {
-					throw new NodeOperationError(this.getNode(), 'Delimiter is required for list tree');
-				}
-				if (maxKeys < 1 || maxKeys > 1000) {
-					throw new NodeOperationError(this.getNode(), 'MaxKeys must be between 1 and 1000');
-				}
-
-				const prefix = normalizePrefix(prefixInput);
-				const requestDate = new Date();
-				const endpoint = buildS3Endpoint(bucket, credentials.region);
-				const queryParams: Record<string, string> = {
-					'list-type': '2',
-					'max-keys': maxKeys.toString(),
-					delimiter,
-				};
-				if (prefix) queryParams.prefix = prefix;
-				if (continuationToken) queryParams['continuation-token'] = continuationToken;
-				const { amzDate } = toAmzDate(requestDate);
-				const headers: Record<string, string> = {
-					host: endpoint.host,
-					'x-amz-date': amzDate,
-					'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
-				};
-				if (credentials.sessionToken) {
-					headers['x-amz-security-token'] = credentials.sessionToken;
-				}
-
-				const requestPath = `${endpoint.pathPrefix || ''}/`;
-				const { authorization } = buildAuthorizationHeader({
-					method: 'GET',
-					path: requestPath,
-					queryParams,
-					headers,
+			try {
+				const presignedPut = buildPresignedPutUrl({
+					bucket,
+					key,
+					expiresIn,
+					contentType: contentType || undefined,
+					contentDisposition: contentDisposition || undefined,
+					acl: acl || undefined,
+					metadata,
 					credentials,
 					requestDate,
+					forcePathStyle,
 				});
 
-				headers.Authorization = authorization;
-
-				try {
-					const url = `https://${endpoint.host}${requestPath}?${buildCanonicalQuery(queryParams)}`;
-					const xmlResponse = await requestXml(url, headers);
-					const parser = new XMLParser({
-						ignoreAttributes: false,
-						attributeNamePrefix: '',
-						parseTagValue: true,
-						parseAttributeValue: true,
-						trimValues: true,
-					});
-					const parsed = parser.parse(xmlResponse);
-					const result = parsed?.ListBucketResult ?? {};
-					const isTruncated = result.IsTruncated === true || result.IsTruncated === 'true';
-					const nextContinuationToken = result.NextContinuationToken ?? '';
-					const commonPrefixes = normalizeArray(result.CommonPrefixes).map(
-						(entry: { Prefix?: string }) => ({
-							Prefix: entry.Prefix ?? '',
-						}),
-					);
-					const contents = normalizeArray(result.Contents)
-						.map((entry: { Key?: string; Size?: string | number; LastModified?: string }) => ({
-							Key: entry.Key ?? '',
-							Size: entry.Size ? Number(entry.Size) : 0,
-							LastModified: entry.LastModified ?? '',
-						}))
-						.filter((entry) => entry.Key && entry.Key !== prefix);
-
-					const folderNodes = commonPrefixes.map((entry) => ({
-						type: 'folder',
-						key: entry.Prefix,
-						path: entry.Prefix,
-						name: toFolderName(entry.Prefix),
-					}));
-					const fileNodes = contents.map((entry) => ({
-						type: 'file',
-						key: entry.Key,
-						path: entry.Key,
-						name: toFileName(entry.Key),
-						size: entry.Size,
-						lastModified: entry.LastModified,
-					}));
-
-					returnData.push({
-						json: {
-							items: [...folderNodes, ...fileNodes],
-							pagination: {
-								hasMore: isTruncated,
-								nextToken: nextContinuationToken,
-							},
-						},
-					});
-				} catch (error) {
-					const message = error instanceof Error ? error.message : 'Unknown error';
-					throw new NodeOperationError(
-						this.getNode(),
-						`Failed to list S3 objects: ${message}`,
-					);
-				}
+				returnData.push({
+					json: {
+						url: presignedPut.url,
+						method: 'PUT',
+						headers: presignedPut.headers,
+						expiresAt: presignedPut.expiresAt,
+					},
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : 'Unknown error';
+				throw new NodeOperationError(
+					this.getNode(),
+					`Failed to generate presigned upload data: ${message}`,
+				);
 			}
 		}
 
